@@ -28,6 +28,11 @@ type ConvertPlanOptions struct {
 
 	// Token used to make authenticated API requests to GitHub to increase rate limits
 	GitHubToken string
+
+	// State to use as the application source. When nil, the context is synced
+	// from the client session's "context" local mount. The frontend sets this
+	// to a git source when the context option is a git URL.
+	ContextState *llb.State
 }
 
 const (
@@ -37,15 +42,19 @@ const (
 func ConvertPlanToLLB(plan *p.BuildPlan, opts ConvertPlanOptions) (*llb.State, *Image, error) {
 	platform := opts.BuildPlatform
 
-	localState := llb.Local("context",
-		llb.SharedKeyHint("local"),
-		llb.SessionID(opts.SessionID),
-		llb.WithCustomName("loading ."),
-		llb.FollowPaths([]string{"."}),
-	)
+	contextState := opts.ContextState
+	if contextState == nil {
+		localState := llb.Local("context",
+			llb.SharedKeyHint("local"),
+			llb.SessionID(opts.SessionID),
+			llb.WithCustomName("loading ."),
+			llb.FollowPaths([]string{"."}),
+		)
+		contextState = &localState
+	}
 
 	cacheStore := build_llb.NewBuildKitCacheStore(opts.CacheKey)
-	graph, err := build_llb.NewBuildGraph(plan, &localState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken)
+	graph, err := build_llb.NewBuildGraph(plan, contextState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken)
 	if err != nil {
 		return nil, nil, err
 	}
