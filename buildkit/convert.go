@@ -32,6 +32,11 @@ type ConvertPlanOptions struct {
 	GitHubToken string
 	// Do not use cache when building
 	NoCache bool
+
+	// State to use as the application source. When nil, the context is synced
+	// from the client session's "context" local mount. The frontend sets this
+	// to a git source when the context option is a git URL.
+	ContextState *llb.State
 }
 
 const WorkingDir = "/app"
@@ -39,22 +44,13 @@ const WorkingDir = "/app"
 func ConvertPlanToLLB(plan *p.BuildPlan, opts ConvertPlanOptions) (*llb.State, *Image, error) {
 	platform := opts.BuildPlatform
 
-	// by default, the whole directory is transferred into context, we don't need to explicitly include it
-	localOpts := []llb.LocalOption{
-		llb.SharedKeyHint("local"),
-		llb.SessionID(opts.SessionID),
-		llb.WithCustomName("loading ."),
+	contextState, err := resolveSourceState(plan, opts)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	// note that exclude patterns can contain inverse (inclusions) patterns. The llb.IncludePatterns should *not* be used for this
-	if len(plan.Exclude) > 0 {
-		localOpts = append(localOpts, llb.ExcludePatterns(plan.Exclude))
-	}
-
-	localState := llb.Local("context", localOpts...)
 
 	cacheStore := build_llb.NewBuildKitCacheStore(opts.CacheKey)
-	graph, err := build_llb.NewBuildGraph(plan, &localState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken, opts.NoCache)
+	graph, err := build_llb.NewBuildGraph(plan, contextState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken, opts.NoCache)
 	if err != nil {
 		return nil, nil, err
 	}
