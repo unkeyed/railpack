@@ -67,12 +67,18 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 		return nil, fmt.Errorf("error marshalling plan: %w", err)
 	}
 
+	contextState, err := resolveContextState(opts, c.BuildOpts().SessionID)
+	if err != nil {
+		return nil, err
+	}
+
 	llbState, image, err := ConvertPlanToLLB(plan, ConvertPlanOptions{
 		BuildPlatform: buildPlatform,
 		SecretsHash:   secretsHash,
 		CacheKey:      cacheKey,
 		SessionID:     c.BuildOpts().SessionID,
 		GitHubToken:   githubToken,
+		ContextState:  contextState,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error converting plan to LLB: %w", err)
