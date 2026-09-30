@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/util/system"
@@ -28,6 +30,8 @@ type ConvertPlanOptions struct {
 
 	// Token used to make authenticated API requests to GitHub to increase rate limits
 	GitHubToken string
+	// Do not use cache when building
+	NoCache bool
 
 	// State to use as the application source. When nil, the context is synced
 	// from the client session's "context" local mount. The frontend sets this
@@ -35,26 +39,18 @@ type ConvertPlanOptions struct {
 	ContextState *llb.State
 }
 
-const (
-	WorkingDir = "/app"
-)
+const WorkingDir = "/app"
 
 func ConvertPlanToLLB(plan *p.BuildPlan, opts ConvertPlanOptions) (*llb.State, *Image, error) {
 	platform := opts.BuildPlatform
 
-	contextState := opts.ContextState
-	if contextState == nil {
-		localState := llb.Local("context",
-			llb.SharedKeyHint("local"),
-			llb.SessionID(opts.SessionID),
-			llb.WithCustomName("loading ."),
-			llb.FollowPaths([]string{"."}),
-		)
-		contextState = &localState
+	contextState, err := resolveSourceState(plan, opts)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	cacheStore := build_llb.NewBuildKitCacheStore(opts.CacheKey)
-	graph, err := build_llb.NewBuildGraph(plan, contextState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken)
+	graph, err := build_llb.NewBuildGraph(plan, contextState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken, opts.NoCache)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -107,11 +103,12 @@ func getImageEnv(graphOutput *build_llb.BuildGraphOutput, plan *p.BuildPlan) []s
 	slices.Sort(paths)
 	pathString := strings.Join(paths, ":")
 
-	envMap := make(map[string]string, len(graphOutput.GraphEnv.EnvVars)+len(plan.Deploy.Variables)+1)
+	envMap := make(map[string]string, len(graphOutput.GraphEnv.EnvVars)+len(plan.Deploy.Variables)+2)
 	maps.Copy(envMap, graphOutput.GraphEnv.EnvVars)
 	maps.Copy(envMap, plan.Deploy.Variables)
 
 	envMap["PATH"] = pathString
+	envMap["RAILPACK_BUILT_AT"] = strconv.FormatInt(time.Now().Unix(), 10)
 
 	envVars := make([]string, 0, len(envMap))
 	for _, k := range slices.Sorted(maps.Keys(envMap)) {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/solver/pb"
+	p "github.com/railwayapp/railpack/core/plan"
 )
 
 // sourceIdentifiers marshals a state and returns the identifiers of all
@@ -57,7 +58,7 @@ func TestResolveContextStateGitURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			st, err := resolveContextState(map[string]string{"context": tt.context}, "session-id")
+			st, err := resolveContextState(map[string]string{"context": tt.context})
 			if err != nil {
 				t.Fatalf("resolveContextState(%q) returned error: %v", tt.context, err)
 			}
@@ -87,12 +88,19 @@ func TestResolveContextStateLocalFallback(t *testing.T) {
 				opts["context"] = contextOpt
 			}
 
-			st, err := resolveContextState(opts, "session-id")
+			st, err := resolveContextState(opts)
 			if err != nil {
 				t.Fatalf("resolveContextState returned error: %v", err)
 			}
+			if st != nil {
+				t.Fatalf("resolveContextState returned a state, want nil for local fallback")
+			}
 
-			identifiers := sourceIdentifiers(t, st)
+			src, err := resolveSourceState(&p.BuildPlan{}, ConvertPlanOptions{SessionID: "session-id"})
+			if err != nil {
+				t.Fatalf("resolveSourceState returned error: %v", err)
+			}
+			identifiers := sourceIdentifiers(t, src)
 			if len(identifiers) != 1 {
 				t.Fatalf("got %d source ops, want 1", len(identifiers))
 			}
@@ -100,5 +108,39 @@ func TestResolveContextStateLocalFallback(t *testing.T) {
 				t.Errorf("source identifier = %q, want %q", identifiers[0], "local://context")
 			}
 		})
+	}
+}
+
+func TestResolveSourceStateGitAppliesExcludes(t *testing.T) {
+	gitState, err := resolveContextState(map[string]string{"context": "https://github.com/org/repo.git#main"})
+	if err != nil {
+		t.Fatalf("resolveContextState returned error: %v", err)
+	}
+
+	plan := &p.BuildPlan{Exclude: []string{"node_modules", "!keep"}}
+	st, err := resolveSourceState(plan, ConvertPlanOptions{ContextState: gitState})
+	if err != nil {
+		t.Fatalf("resolveSourceState returned error: %v", err)
+	}
+
+	def, err := st.Marshal(context.Background())
+	if err != nil {
+		t.Fatalf("failed to marshal state: %v", err)
+	}
+
+	var excludes []string
+	for _, dt := range def.Def {
+		var op pb.Op
+		if err := op.UnmarshalVT(dt); err != nil {
+			t.Fatalf("failed to unmarshal op: %v", err)
+		}
+		for _, action := range op.GetFile().GetActions() {
+			if cp := action.GetCopy(); cp != nil {
+				excludes = append(excludes, cp.ExcludePatterns...)
+			}
+		}
+	}
+	if strings.Join(excludes, ",") != "node_modules,!keep" {
+		t.Errorf("copy exclude patterns = %v, want [node_modules !keep]", excludes)
 	}
 }
