@@ -33,9 +33,7 @@ type ConvertPlanOptions struct {
 	// Do not use cache when building
 	NoCache bool
 
-	// State to use as the application source. When nil, the context is synced
-	// from the client session's "context" local mount. The frontend sets this
-	// to a git source when the context option is a git URL.
+	// Application source, such as a git checkout. When nil, the source is the session's "context" local mount
 	ContextState *llb.State
 }
 
@@ -44,13 +42,10 @@ const WorkingDir = "/app"
 func ConvertPlanToLLB(plan *p.BuildPlan, opts ConvertPlanOptions) (*llb.State, *Image, error) {
 	platform := opts.BuildPlatform
 
-	contextState, err := resolveSourceState(plan, opts)
-	if err != nil {
-		return nil, nil, err
-	}
+	sourceState := getSourceState(plan, opts)
 
 	cacheStore := build_llb.NewBuildKitCacheStore(opts.CacheKey)
-	graph, err := build_llb.NewBuildGraph(plan, contextState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken, opts.NoCache)
+	graph, err := build_llb.NewBuildGraph(plan, &sourceState, cacheStore, opts.SecretsHash, &platform, opts.GitHubToken, opts.NoCache)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -88,6 +83,36 @@ func ConvertPlanToLLB(plan *p.BuildPlan, opts ConvertPlanOptions) (*llb.State, *
 	}
 
 	return &state, &image, nil
+}
+func getSourceState(plan *p.BuildPlan, opts ConvertPlanOptions) llb.State {
+	if opts.ContextState == nil {
+		// by default, the whole directory is transferred into context, we don't need to explicitly include it
+		localOpts := []llb.LocalOption{
+			llb.SharedKeyHint("local"),
+			llb.SessionID(opts.SessionID),
+			llb.WithCustomName("loading ."),
+		}
+
+		// note that exclude patterns can contain inverse (inclusions) patterns. The llb.IncludePatterns should *not* be used for this
+		if len(plan.Exclude) > 0 {
+			localOpts = append(localOpts, llb.ExcludePatterns(plan.Exclude))
+		}
+
+		return llb.Local("context", localOpts...)
+	}
+
+	if len(plan.Exclude) == 0 {
+		return *opts.ContextState
+	}
+
+	// unlike a local mount, a git source has no exclude option, so the excludes are applied by copying
+	return llb.Scratch().File(
+		llb.Copy(*opts.ContextState, "/", "/", &llb.CopyInfo{
+			CopyDirContentsOnly: true,
+			ExcludePatterns:     plan.Exclude,
+		}),
+		llb.WithCustomName("filtering context"),
+	)
 }
 
 func getStartState(buildState llb.State) llb.State {

@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/log"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
+	"github.com/moby/buildkit/frontend/dockerui"
 	"github.com/moby/buildkit/frontend/gateway/client"
 	gw "github.com/moby/buildkit/frontend/gateway/grpcclient"
 	"github.com/moby/buildkit/util/appcontext"
@@ -38,6 +40,9 @@ const (
 	// buildctl --import-cache is serialized into this frontend opt by the BuildKit client
 	// `docker buildx` uses a different arg name, but the buildkit frontend normalizes the opt name the frontend receives
 	keyCacheImports = "cache-imports"
+
+	keyContext              = "context"
+	keyContextKeepGitDirArg = "build-arg:BUILDKIT_CONTEXT_KEEP_GIT_DIR"
 )
 
 func StartFrontend() {
@@ -75,7 +80,7 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 		return nil, fmt.Errorf("error marshalling plan: %w", err)
 	}
 
-	contextState, err := resolveContextState(opts)
+	gitContext, err := parseGitContext(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +91,7 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 		CacheKey:      cacheKey,
 		SessionID:     c.BuildOpts().SessionID,
 		GitHubToken:   githubToken,
-		ContextState:  contextState,
+		ContextState:  gitContext,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error converting plan to LLB: %w", err)
@@ -243,4 +248,21 @@ func parseCacheImports(opts map[string]string) ([]client.CacheOptionsEntry, erro
 		cacheImports = append(cacheImports, client.CacheOptionsEntry{Type: e.Type, Attrs: e.Attrs})
 	}
 	return cacheImports, nil
+}
+func parseGitContext(opts map[string]string) (*llb.State, error) {
+	var keepGit *bool
+	if v, err := strconv.ParseBool(opts[keyContextKeepGitDirArg]); err == nil {
+		keepGit = &v
+	}
+
+	// DetectGitContext also returns an error for values that are not git URLs,
+	// so isGit must be checked first.
+	st, isGit, err := dockerui.DetectGitContext(opts[keyContext], keepGit)
+	if !isGit {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, errors.Wrapf(err, "invalid git context %q", opts[keyContext])
+	}
+	return st, nil
 }

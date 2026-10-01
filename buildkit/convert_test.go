@@ -2,6 +2,7 @@ package buildkit
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -9,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/solver/pb"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/railwayapp/railpack/buildkit/build_llb"
 	"github.com/railwayapp/railpack/core"
@@ -110,4 +113,83 @@ func TestDeployVariablesDoNotAffectLLB(t *testing.T) {
 
 	require.Equal(t, firstDefinition.ToPB(), secondDefinition.ToPB())
 	require.NotEqual(t, firstImage.Config.Env, secondImage.Config.Env)
+}
+
+func TestGetSourceStateLocal(t *testing.T) {
+	buildPlan := &plan.BuildPlan{Exclude: []string{"node_modules", "!keep"}}
+
+	ops := marshalOps(t, getSourceState(buildPlan, ConvertPlanOptions{SessionID: "session-id"}))
+
+	sources := sourceOps(ops)
+	require.Len(t, sources, 1)
+	require.Equal(t, "local://context", sources[0].Identifier)
+	var excludes []string
+	require.NoError(t, json.Unmarshal([]byte(sources[0].Attrs[pb.AttrExcludePatterns]), &excludes))
+	require.Equal(t, buildPlan.Exclude, excludes)
+}
+
+func TestGetSourceStateGit(t *testing.T) {
+	gitState := llb.Git("https://github.com/org/repo.git", "main")
+
+	tests := []struct {
+		name         string
+		exclude      []string
+		wantExcludes [][]string
+	}{
+		{name: "no_excludes", exclude: nil, wantExcludes: nil},
+		{name: "excludes", exclude: []string{"node_modules", "!keep"}, wantExcludes: [][]string{{"node_modules", "!keep"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buildPlan := &plan.BuildPlan{Exclude: tt.exclude}
+
+			ops := marshalOps(t, getSourceState(buildPlan, ConvertPlanOptions{ContextState: &gitState}))
+
+			sources := sourceOps(ops)
+			require.Len(t, sources, 1)
+			require.True(t, strings.HasPrefix(sources[0].Identifier, "git://"), "source = %q, want a git source", sources[0].Identifier)
+			var gotExcludes [][]string
+			for _, cp := range copyActions(ops) {
+				gotExcludes = append(gotExcludes, cp.ExcludePatterns)
+			}
+			require.Equal(t, tt.wantExcludes, gotExcludes, "copy exclude patterns for plan exclude %q", tt.exclude)
+		})
+	}
+}
+func marshalOps(t *testing.T, st llb.State) []*pb.Op {
+	t.Helper()
+
+	def, err := st.Marshal(context.Background())
+	require.NoError(t, err)
+
+	ops := make([]*pb.Op, 0, len(def.Def))
+	for _, dt := range def.Def {
+		var op pb.Op
+		require.NoError(t, op.UnmarshalVT(dt))
+		ops = append(ops, &op)
+	}
+	return ops
+}
+
+func sourceOps(ops []*pb.Op) []*pb.SourceOp {
+	var sources []*pb.SourceOp
+	for _, op := range ops {
+		if src := op.GetSource(); src != nil {
+			sources = append(sources, src)
+		}
+	}
+	return sources
+}
+
+func copyActions(ops []*pb.Op) []*pb.FileActionCopy {
+	var copies []*pb.FileActionCopy
+	for _, op := range ops {
+		for _, action := range op.GetFile().GetActions() {
+			if cp := action.GetCopy(); cp != nil {
+				copies = append(copies, cp)
+			}
+		}
+	}
+	return copies
 }
