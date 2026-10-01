@@ -1,6 +1,6 @@
 # Image used by railpack during the build process, but not as the base image of the final runtime image
 # scm = fat image containing a lot of build tools
-FROM buildpack-deps:bookworm-scm
+FROM buildpack-deps:trixie-scm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -25,7 +25,7 @@ ENV MISE_INSTALL_PATH=/usr/local/bin/mise \
 # https://mise.jdx.dev/installing-mise.html
 RUN gpg --keyserver hkps://keys.openpgp.org --recv-keys 24853EC9F655CE80B48E6C3A8B81C9D17413A06D && \
   curl https://mise.jdx.dev/install.sh.sig | gpg --decrypt > install_mise.sh && \
-  MISE_DEBUG=true sh ./install_mise.sh && \
+  MISE_DEBUG=true MISE_INSTALL_MUSL=1 sh ./install_mise.sh && \
   rm install_mise.sh && \
   gpg --batch --yes --delete-keys 24853EC9F655CE80B48E6C3A8B81C9D17413A06D && \
   rm -rf /root/.gnupg/openpgp-revocs.d/*
@@ -58,6 +58,7 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     tk-dev \
     libxml2-dev \
+    libicu-dev \
     libxmlsec1-dev \
     libffi-dev \
     # Image processing
