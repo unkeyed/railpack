@@ -1,7 +1,7 @@
 {
  "deploy": {
   "base": {
-   "image": "ghcr.io/railwayapp/railpack-runtime:mise-2026.6.1"
+   "image": "ghcr.io/railwayapp/railpack-runtime:mise-2026.10.3"
   },
   "inputs": [
    {
@@ -17,13 +17,16 @@
     "step": "build"
    }
   ],
-  "startCommand": "caddy run --config Caddyfile --adapter caddyfile 2\u003e\u00261"
+  "startCommand": "caddy run --config Caddyfile --adapter caddyfile 2\u003e\u00261",
+  "variables": {
+   "RAILPACK_VERSION": "dev"
+  }
  },
  "steps": [
   {
    "commands": [
     {
-     "cmd": "mise install-into caddy@2.11.3 /railpack/caddy"
+     "cmd": "mise install-into caddy@2.11.4 /railpack/caddy"
     },
     {
      "path": "/railpack/caddy"
@@ -34,7 +37,7 @@
    ],
    "inputs": [
     {
-     "image": "ghcr.io/railwayapp/railpack-builder:mise-2026.6.1"
+     "image": "ghcr.io/railwayapp/railpack-builder:mise-2026.10.3"
     }
    ],
    "name": "packages:caddy",
