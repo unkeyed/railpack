@@ -20,7 +20,11 @@ permissions:
 
 env:
   MISE_ENV: ci
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/railpack-frontend
+  # A package created by this workflow's GITHUB_TOKEN is linked to this
+  # repository and inherits its visibility, so pushes need no package settings.
+  # The older ghcr.io/unkeyed/railpack-frontend was pushed by hand and is not
+  # writable from Actions.
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/frontend
 
 jobs:
   publish-frontend:
