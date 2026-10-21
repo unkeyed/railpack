@@ -1,8 +1,13 @@
 # Image used by railpack during the build process, but not as the base image of the final runtime image
 # scm = fat image containing a lot of build tools
-FROM buildpack-deps:trixie-scm
+FROM buildpack-deps:trixie-scm@sha256:076aa0dfcdfcb2a920c205e1594e3892f5963fe7ce706b626e62eb1ea83661cf
 
 ENV DEBIAN_FRONTEND=noninteractive
+
+# eMudhra fix: ca-certificates >= 20250419+deb13u1, before downloading build tools.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419+deb13u1' \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG MISE_VERSION
 RUN if [ -z "$MISE_VERSION" ] || [ -z "$(echo $MISE_VERSION | tr -d ' ')" ]; then \
